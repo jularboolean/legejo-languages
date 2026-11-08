@@ -14,7 +14,7 @@ env:
   # The Legejo commit whose langpack builder makes the packs. The builder is
   # on Legejo's `languages` branch until it is released; move this to a
   # release tag (e.g. v1.46.0) once it is.
-  LEGEJO_REF: bca8a14edfd31dc5b0908d7844aedc2f648b69a3
+  LEGEJO_REF: 05e7f2fd4f95a847c0f7f67a3bae06922d6ec535
   LANGPACK: ${{ github.workspace }}/bin/langpack
 
 concurrency:

@@ -14,7 +14,8 @@ them as a [release](https://github.com/jularboolean/legejo-languages/releases/la
 ## Download
 
 Get packs from **https://legejo.se/languages**. Downloads there are
-counted: one number per pack and day, nothing about who downloaded.
+counted per pack, day, country and the site the link was followed from;
+nothing about who downloaded is kept, and the figures are not published.
 The same files are the assets of the
 [latest release](https://github.com/jularboolean/legejo-languages/releases/latest),
 together with `index.json`, which lists every pack with its size and
