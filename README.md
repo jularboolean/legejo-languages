@@ -23,7 +23,9 @@ SHA-256.
 
 ## Install
 
-- In Legejo: **Admin → Languages → Import**, and choose the zip.
+- In Legejo: **Admin → Languages**, then **Install** next to the language
+  (Legejo fetches it from legejo.se). A downloaded zip can be imported there
+  too.
 - Or by hand: unzip it into the data directory as `<data dir>/languages/<code>/`
   (with Docker, `/data/languages/nl/pack.json`, `lemmas.tsv`, `forms.tsv`)
   and restart Legejo.
@@ -41,10 +43,8 @@ list.
 | `nl` | Nederlands | Dutch |
 | `sw` | Kiswahili | Swahili |
 
-Esperanto is built into Legejo (from ESPDIC) and is not a pack here.
-Spanish, French and German are currently also built into Legejo; their
-packs here are made from the same data, and an imported pack replaces the
-built-in one.
+Esperanto is built into Legejo (from ESPDIC) and is not a pack here. Every
+other language, Spanish, French and German included, is a pack.
 
 ## Add a language
 
