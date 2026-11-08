@@ -1,0 +1,120 @@
+name: Build language packs
+
+on:
+  push:
+    branches: [main]
+    paths: ["languages/**", "build/**"]
+  pull_request:
+    paths: ["languages/**", "build/**"]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 3 * *" # monthly, after kaikki.org's regular refresh
+
+env:
+  # The Legejo commit whose langpack builder makes the packs. The builder is
+  # on Legejo's `languages` branch until it is released; move this to a
+  # release tag (e.g. v1.46.0) once it is.
+  LEGEJO_REF: bca8a14edfd31dc5b0908d7844aedc2f648b69a3
+  LANGPACK: ${{ github.workspace }}/bin/langpack
+
+concurrency:
+  group: packs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Test the build script
+        run: python3 -m unittest discover -s build
+
+      - name: Which languages
+        id: which
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+            if echo "$changed" | grep -q '^build/'; then
+              codes=""   # the build itself changed: build everything
+            else
+              codes=$(echo "$changed" | sed -n 's|^languages/\([a-z]*\)/.*|\1|p' | sort -u |
+                while read -r c; do [ -f "languages/$c/recipe.json" ] && echo "$c"; done | tr '\n' ' ')
+              [ -n "$codes" ] || { echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+            fi
+          fi
+          echo "codes=$codes" >> "$GITHUB_OUTPUT"
+          echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the langpack binary
+        if: steps.which.outputs.skip != 'true'
+        id: bin
+        uses: actions/cache@v4
+        with:
+          path: bin/langpack
+          key: langpack-${{ runner.os }}-${{ env.LEGEJO_REF }}
+
+      - name: Check out Legejo
+        if: steps.which.outputs.skip != 'true' && steps.bin.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: jularboolean/legejo
+          ref: ${{ env.LEGEJO_REF }}
+          path: legejo
+
+      - name: Cache cargo
+        if: steps.which.outputs.skip != 'true' && steps.bin.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: legejo/server
+
+      - name: Build langpack
+        if: steps.which.outputs.skip != 'true' && steps.bin.outputs.cache-hit != 'true'
+        run: |
+          cd legejo/server
+          cargo build --release --locked --bin langpack
+          mkdir -p "$GITHUB_WORKSPACE/bin"
+          cp target/release/langpack "$GITHUB_WORKSPACE/bin/"
+
+      - name: Cache the kaikki.org dumps
+        if: steps.which.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: cache
+          # One entry per month; the first run of a month starts from the last
+          # month's dumps and downloads only those kaikki.org has replaced.
+          key: kaikki-${{ steps.which.outputs.month }}
+          restore-keys: kaikki-
+
+      - name: Build the packs
+        if: steps.which.outputs.skip != 'true'
+        run: |
+          set -o pipefail
+          python3 build/build.py ${{ steps.which.outputs.codes }} 2>&1 | tee build.log
+
+      - name: Summary
+        if: steps.which.outputs.skip != 'true' && always()
+        run: |
+          { echo '```'; cat build.log 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish a release
+        if: steps.which.outputs.skip != 'true' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          day=$(date -u +%Y-%m-%d)
+          tag="packs-$day"; n=1
+          while gh release view "$tag" >/dev/null 2>&1; do n=$((n + 1)); tag="packs-$day-$n"; done
+          {
+            echo "Language packs for Legejo built $day from the English Wiktionary via kaikki.org (CC BY-SA 4.0)."
+            echo "Builder: jularboolean/legejo@$LEGEJO_REF"
+            echo
+            echo '```'
+            cat build.log
+            echo '```'
+          } > notes.md
+          gh release create "$tag" dist/*.zip dist/index.json --title "Language packs $day" --notes-file notes.md --latest
