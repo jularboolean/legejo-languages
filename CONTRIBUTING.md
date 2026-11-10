@@ -26,15 +26,9 @@ name as its speakers write it, the downloaded file, and the folder to write
 the pack into. On Linux, add `--user "$(id -u):$(id -g)"` before
 `slurvdjur/legejo` so that the files are yours.
 
-`langpack` ships in the Legejo image from the next Legejo release. Until
-then, build it from a source checkout of
-[Legejo](https://github.com/jularboolean/legejo) with
-[Rust](https://rustup.rs):
-
-```sh
-cd legejo/server
-cargo run --release --bin langpack -- nl "Nederlands" /path/to/kaikki.org-dictionary-Dutch.jsonl.gz /path/to/out
-```
+`langpack` is part of the Legejo image. With `--tags` before the language
+code it also writes the pack's extras, which you only need to look at the
+grammar (see [Extras](#extras-the-grammar)).
 
 ## 3. Read the summary
 
@@ -63,6 +57,30 @@ Zip the three files in `out/` (`pack.json`, `lemmas.tsv`, `forms.tsv`) and
 import the zip under **Admin → Languages → Import**, or copy the folder to
 `<data dir>/languages/<code>/` and restart. Open a book in the language and
 look at its study list.
+
+## Extras: the grammar
+
+You do not have to do anything for a language to get its extras. The
+workflow builds them for every language from the same recipe: what each
+inflected form is (*liep*: past tense of *lopen*), read from the inflection
+tables of the language's Wiktionary entries. With them Legejo counts the
+tenses, moods, persons and cases of a book on its Analysis page and shows
+the table of a word's forms in the reader. A language whose entries have no
+such tables gets a pack without extras, which is fine.
+
+To see what your language gets, build with `--tags` (Legejo 1.47 or newer):
+
+```sh
+docker run --rm -v "$PWD:/work" slurvdjur/legejo langpack --tags nl "Nederlands" /work/kaikki.org-dictionary-Dutch.jsonl.gz /work/out
+```
+
+The summary then also says how many forms were tagged, and `out/` also
+holds `tags.tsv` and `extras.json`. Zip all five files and import the zip
+as in step 4, open a book in the language, and look at **Grammar** on its
+Analysis page and at **Forms** for a selected word in the reader. A form
+that can be several things (Dutch *lopen*: infinitive or plural present) is
+counted as possibly each; that is as it should be. Wrong tables are best
+corrected in Wiktionary.
 
 ## 5. Open a pull request
 
@@ -128,19 +146,23 @@ longer in the pack stops the build, so a stale fix is noticed and removed.
 - The summary from the pull request's build: no wikitext, no empty glosses,
   and little words whose first meanings read well.
 - That `fixes.tsv` lines are real corrections, short and in plain English.
-- That no generated file (`pack.json`, `lemmas.tsv`, `forms.tsv`, zips) is
-  in the pull request.
+- That no generated file (`pack.json`, `lemmas.tsv`, `forms.tsv`,
+  `tags.tsv`, `extras.json`, zips) is in the pull request.
 
 ## Building every pack
 
 `build/build.py` does what the workflow does: for each recipe it downloads
 the dump (kept in `cache/`), runs `langpack`, adds `also` and the fixes, and
-writes `dist/<code>.zip` and `dist/index.json`. It needs Python 3 and the
-`langpack` binary:
+writes `dist/<code>.zip` and `dist/index.json`; with `--extras` also
+`dist/<code>.extras.zip` for the languages whose tables gave tags. It needs
+Python 3 and the `langpack` binary, built from a checkout of
+[Legejo](https://github.com/jularboolean/legejo) with
+`cargo build --release --bin langpack` in `server/`:
 
 ```sh
 python3 build/build.py --langpack /path/to/langpack          # every language
 python3 build/build.py --langpack /path/to/langpack nl sw    # some
+python3 build/build.py --langpack /path/to/langpack --extras # with extras
 python3 -m unittest discover -s build                        # its tests
 ```
 
