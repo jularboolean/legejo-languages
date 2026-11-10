@@ -33,6 +33,16 @@ SHA-256.
 Books in that language are counted again in the background and get a study
 list.
 
+## Extras
+
+A pack may come with extras: what each inflected form is (*hizo*: third
+person singular preterite of *hacer*), from Wiktionary's inflection tables.
+With them Legejo counts the forms a book is written in on the book's
+Analysis page and shows the table of a word's forms in the reader. They are
+a file of their own, `<code>.extras.zip`, listed under the pack's `extras`
+in `index.json`; Legejo fetches it together with the pack. Legejo 1.46 and
+older do not know of extras and install the pack alone, as before.
+
 ## Languages
 
 | Code | Name | English name |

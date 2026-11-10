@@ -116,6 +116,52 @@ class Index(unittest.TestCase):
                                           "sha256", "license", "attribution"})
 
 
+class Extras(unittest.TestCase):
+    TAGS = [["huizen", "huis", "plural"], ["liep", "lopen", "first-person singular past;third-person singular past"],
+            ["weg", "wegen", "first-person singular present"], ["broken"]]
+
+    def test_tags_follow_the_fixes(self):
+        lemmas = [["huis", "noun", "house"], ["lopen", "verb", "to walk"]]
+        forms = [["huizen", "huis"], ["liep", "lopen"], ["weg", "weg"]]
+        # "wegen" was dropped, and a line that is not three columns goes too.
+        self.assertEqual(build.kept_tags(self.TAGS, lemmas, forms), self.TAGS[:2])
+        # A form no longer linked to its lemma loses its tags.
+        self.assertEqual(build.kept_tags(self.TAGS, lemmas, [["liep", "lopen"]]), [self.TAGS[1]])
+
+    def test_extras_are_a_zip_of_their_own_named_in_the_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = os.path.join(tmp, "nl")
+            os.makedirs(pack)
+            with open(os.path.join(pack, "pack.json"), "w") as f:
+                json.dump({"format": 1, "language": "nl", "version": "2026-01-02"}, f)
+            build.write_tsv(os.path.join(pack, "lemmas.tsv"), LEMMAS)
+            build.write_tsv(os.path.join(pack, "forms.tsv"), FORMS)
+            zip_path = os.path.join(tmp, "nl.zip")
+            extras_path = os.path.join(tmp, "nl.extras.zip")
+            build.write_zip(pack, zip_path, "readme")
+            recipe = {"code": "nl", "name": "Nederlands", "english": "Dutch", "kaikki": "Dutch"}
+
+            # No tags, no extras: the entry is as it always was.
+            self.assertFalse(build.write_extras_zip(pack, extras_path, "readme"))
+            build.write_tsv(os.path.join(pack, "tags.tsv"), [])
+            self.assertFalse(build.write_extras_zip(pack, extras_path, "readme"))
+            self.assertFalse(os.path.exists(extras_path))
+            self.assertNotIn("extras", build.index_entry(recipe, pack, zip_path))
+
+            build.write_tsv(os.path.join(pack, "tags.tsv"), self.TAGS[:2])
+            with open(os.path.join(pack, "extras.json"), "w") as f:
+                json.dump({"format": 1, "language": "nl", "version": "2026-01-02", "tags": True}, f)
+            self.assertTrue(build.write_extras_zip(pack, extras_path, "readme"))
+            with zipfile.ZipFile(extras_path) as z:
+                self.assertEqual(sorted(z.namelist()), ["README.txt", "extras.json", "tags.tsv"])
+            # The pack's zip holds what Legejo 1.46 takes, and nothing else.
+            with zipfile.ZipFile(zip_path) as z:
+                self.assertEqual(sorted(z.namelist()), ["README.txt", "forms.tsv", "lemmas.tsv", "pack.json"])
+            entry = build.index_entry(recipe, pack, zip_path, extras_path)
+            self.assertEqual(entry["extras"], {"sha256": build.sha256(extras_path), "bytes": os.path.getsize(extras_path)})
+            self.assertEqual(entry["sha256"], build.sha256(zip_path))
+
+
 class Recipes(unittest.TestCase):
     def test_every_recipe_loads(self):
         codes = build.all_codes()

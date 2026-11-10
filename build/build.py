@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Build Legejo language packs from their recipes.
 
-    python3 build/build.py --langpack PATH [--cache DIR] [--dist DIR] [--offline] [code ...]
+    python3 build/build.py --langpack PATH [--cache DIR] [--dist DIR] [--offline] [--extras] [code ...]
 
 For each language (all under languages/ when no code is given): download the
 kaikki.org dump into the cache, run the `langpack` builder, merge the
 recipe's `also` into pack.json, apply fixes.tsv, and write <code>.zip into
 the dist directory. When every language built, dist/index.json lists them.
+
+With --extras the builder is asked for tags.tsv too (what each inflected
+form is, for the analysis of a book in Legejo), which goes into a zip of its
+own, <code>.extras.zip, named under the pack's "extras" in index.json.
+Legejo 1.46 and older take a pack zip with the pack's three files only and
+do not read "extras", so <code>.zip stays as it is. It needs a builder that
+knows --tags.
 Python 3 standard library only.
 """
 
@@ -49,6 +56,25 @@ This pack is licensed under the Creative Commons Attribution-ShareAlike
 4.0 International licence: https://creativecommons.org/licenses/by-sa/4.0/
 You may share and adapt it, also commercially, if you give the same
 attribution and share your changes under the same licence.
+
+Source: https://github.com/jularboolean/legejo-languages
+"""
+
+
+EXTRAS_README_TXT = """Extras for the Legejo language pack: {name} ({code}), version {version}
+
+What each inflected form is ("hizo": third-person singular preterite
+indicative of "hacer"), for the grammar on a book's Analysis page and the
+table of a word's forms in the reader. Legejo fetches this with the pack
+from Admin > Languages. By hand: unzip it into <data dir>/languages/{code}/
+beside the pack's files and restart Legejo.
+
+Data: the inflection tables of the English Wiktionary
+(https://en.wiktionary.org), extracted by kaikki.org (https://kaikki.org).
+Attribution: {attribution}.
+
+Licensed under the Creative Commons Attribution-ShareAlike 4.0
+International licence: https://creativecommons.org/licenses/by-sa/4.0/
 
 Source: https://github.com/jularboolean/legejo-languages
 """
@@ -200,6 +226,33 @@ def apply_fixes(lemmas, forms, fixes, source="fixes.tsv"):
     return lemmas, forms
 
 
+def kept_tags(tags, lemmas, forms):
+    """The rows of tags.tsv (form, lemma, what the form is) that still hold
+    after the fixes: the lemma is there and the form is still a form of it."""
+    keys = {row[0] for row in lemmas}
+    links = {row[0]: set(row[1].split(",")) for row in forms}
+    return [row for row in tags if len(row) == 3 and row[1] in keys and row[1] in links.get(row[0], ())]
+
+
+def write_extras_zip(pack_dir, zip_path, readme):
+    """<code>.extras.zip from the extras the builder wrote; False when the
+    language's tables gave no tags, and there is nothing to publish."""
+    tags = os.path.join(pack_dir, "tags.tsv")
+    if not os.path.exists(tags) or count_lines(tags) == 0:
+        return False
+    names = [n for n in ("tags.tsv", "frequency.tsv", "extras.json") if os.path.exists(os.path.join(pack_dir, n))]
+    tmp = zip_path + ".part"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for name in names:
+            z.write(os.path.join(pack_dir, name), name)
+        z.writestr("README.txt", readme)
+    if os.path.getsize(tmp) > MAX_ZIP:
+        os.remove(tmp)
+        raise BuildError(f"{zip_path}: larger than the importer's {MAX_ZIP} bytes")
+    os.replace(tmp, zip_path)
+    return True
+
+
 def count_lines(path):
     with open(path, "rb") as f:
         return sum(1 for line in f if line.strip())
@@ -229,10 +282,10 @@ def sha256(path):
     return h.hexdigest()
 
 
-def index_entry(recipe, pack_dir, zip_path):
+def index_entry(recipe, pack_dir, zip_path, extras_path=None):
     with open(os.path.join(pack_dir, "pack.json"), encoding="utf-8") as f:
         meta = json.load(f)
-    return {
+    entry = {
         "code": recipe["code"],
         "name": recipe["name"],
         "english": recipe["english"],
@@ -244,6 +297,9 @@ def index_entry(recipe, pack_dir, zip_path):
         "license": meta.get("license", LICENSE),
         "attribution": meta.get("attribution", ATTRIBUTION),
     }
+    if extras_path:
+        entry["extras"] = {"sha256": sha256(extras_path), "bytes": os.path.getsize(extras_path)}
+    return entry
 
 
 def make_index(entries, built):
@@ -253,12 +309,13 @@ def make_index(entries, built):
 # ------------------------------------------------------------ one language
 
 
-def build_one(code, langpack, cache, dist, work, offline=False):
+def build_one(code, langpack, cache, dist, work, offline=False, extras=False):
     recipe = load_recipe(code)
     print(f"== {code} ({recipe['english']})", flush=True)
     dump = fetch(dump_url(recipe), cache, offline)
     pack_dir = os.path.join(work, code)
-    run = subprocess.run([langpack, code, recipe["name"], dump, pack_dir], capture_output=True, text=True)
+    command = [langpack, code, recipe["name"], dump, pack_dir] + (["--tags"] if extras else [])
+    run = subprocess.run(command, capture_output=True, text=True)
     sys.stdout.write(run.stdout)
     sys.stderr.write(run.stderr)
     if run.returncode != 0:
@@ -272,6 +329,7 @@ def build_one(code, langpack, cache, dist, work, offline=False):
         f.write("\n")
 
     fixes_path = os.path.join(LANGUAGES, code, "fixes.tsv")
+    tags_path = os.path.join(pack_dir, "tags.tsv")
     if os.path.exists(fixes_path):
         with open(fixes_path, encoding="utf-8") as f:
             fixes = parse_fixes(f.read(), f"languages/{code}/fixes.tsv")
@@ -280,14 +338,27 @@ def build_one(code, langpack, cache, dist, work, offline=False):
             lemmas, forms = apply_fixes(read_tsv(lemmas_path), read_tsv(forms_path), fixes, f"languages/{code}/fixes.tsv")
             write_tsv(lemmas_path, lemmas)
             write_tsv(forms_path, forms)
+            if os.path.exists(tags_path):
+                write_tsv(tags_path, kept_tags(read_tsv(tags_path), lemmas, forms))
             print(f"  {len(fixes)} fixes applied from languages/{code}/fixes.tsv")
 
     zip_path = os.path.join(dist, f"{code}.zip")
     readme = README_TXT.format(name=recipe["name"], code=code, english=recipe["english"],
                                version=meta.get("version", ""), attribution=meta.get("attribution", ATTRIBUTION))
     write_zip(pack_dir, zip_path, readme)
-    entry = index_entry(recipe, pack_dir, zip_path)
+    extras_path = os.path.join(dist, f"{code}.extras.zip")
+    if os.path.exists(extras_path):
+        os.remove(extras_path)
+    if extras:
+        extras_readme = EXTRAS_README_TXT.format(name=recipe["name"], code=code, version=meta.get("version", ""),
+                                                 attribution=meta.get("attribution", ATTRIBUTION))
+        if not write_extras_zip(pack_dir, extras_path, extras_readme):
+            print(f"  {code}: the inflection tables gave no tags, no extras")
+    have_extras = os.path.exists(extras_path)
+    entry = index_entry(recipe, pack_dir, zip_path, extras_path if have_extras else None)
     print(f"  {code}.zip: {entry['bytes']} bytes, {entry['lemmas']} lemmas, {entry['forms']} forms", flush=True)
+    if have_extras:
+        print(f"  {code}.extras.zip: {entry['extras']['bytes']} bytes, {count_lines(tags_path)} tagged forms", flush=True)
     return entry
 
 
@@ -302,6 +373,7 @@ def main(argv=None):
     p.add_argument("--cache", default=os.path.join(ROOT, "cache"), help="where downloaded dumps are kept")
     p.add_argument("--dist", default=os.path.join(ROOT, "dist"), help="where the zips and index.json go")
     p.add_argument("--offline", action="store_true", help="use cached dumps without asking for newer ones")
+    p.add_argument("--extras", action="store_true", help="also build <code>.extras.zip (needs a builder that knows --tags)")
     args = p.parse_args(argv)
     if not args.langpack:
         p.error("give the langpack binary with --langpack or LANGPACK")
@@ -312,7 +384,7 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix="langpacks-") as work:
         for code in codes:
             try:
-                entries.append(build_one(code, args.langpack, args.cache, args.dist, work, args.offline))
+                entries.append(build_one(code, args.langpack, args.cache, args.dist, work, args.offline, args.extras))
             except (BuildError, OSError, ValueError) as e:
                 print(f"error: {e}", file=sys.stderr, flush=True)
                 failed.append(code)
