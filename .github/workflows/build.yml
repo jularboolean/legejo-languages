@@ -11,13 +11,11 @@ on:
     - cron: "17 4 3 * *" # monthly, after kaikki.org's regular refresh
 
 env:
-  # The Legejo commit whose langpack builder makes the packs. The builder is
-  # on Legejo's `languages` branch until it is released; move this to a
-  # release tag (e.g. v1.46.0) once it is.
-  LEGEJO_REF: 05e7f2fd4f95a847c0f7f67a3bae06922d6ec535
-  # Set to --extras once LEGEJO_REF is a commit whose builder knows --tags:
-  # the build then also makes <code>.extras.zip (see README, Extras).
-  EXTRAS: ""
+  # The Legejo release whose langpack builder makes the packs.
+  LEGEJO_REF: v1.47.0
+  # Also build <code>.extras.zip: what each inflected form is (see README,
+  # Extras). Needs a builder that knows --tags, which 1.47.0 is the first to.
+  EXTRAS: "--extras"
   LANGPACK: ${{ github.workspace }}/bin/langpack
 
 concurrency:
